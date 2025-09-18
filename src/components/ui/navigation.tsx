@@ -22,7 +22,7 @@ export function Navigation({ className }: NavigationProps) {
   ]
 
   return (
-    <nav className={cn('flex items-center justify-between', className)}>
+    <nav className={cn('flex items-center', className)}>
       {/* Logo */}
       <Link href="/">
         <div className="flex items-center space-x-2">
@@ -34,7 +34,7 @@ export function Navigation({ className }: NavigationProps) {
       </Link>
 
       {/* Desktop Navigation */}
-      <div className="hidden md:flex items-center space-x-4">
+      <div className="hidden md:flex items-center space-x-4 ml-8">
         {navigationLinks.map((link) => (
           <Link
             key={link.href}
@@ -50,7 +50,7 @@ export function Navigation({ className }: NavigationProps) {
       </div>
 
       {/* Desktop Auth Buttons */}
-      <div className="hidden md:flex items-center space-x-2">
+      <div className="hidden md:flex items-center space-x-2 ml-auto">
         <Button variant="ghost" asChild>
           <Link href="/auth/signin">Logg inn</Link>
         </Button>
@@ -63,7 +63,7 @@ export function Navigation({ className }: NavigationProps) {
       <Button
         variant="ghost"
         size="sm"
-        className="md:hidden"
+        className="md:hidden ml-auto"
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
       >
         {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
