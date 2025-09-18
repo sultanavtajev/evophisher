@@ -201,18 +201,33 @@ export default function ReportingSettingsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // Set user email as default sender
-      setSettings(prev => ({
-        ...prev,
-        email_settings: {
-          ...prev.email_settings,
-          sender_email: user.email || ''
-        },
-        automated_reports: {
-          ...prev.automated_reports,
-          recipients: [user.email || '']
-        }
-      }))
+      // Load report settings from database
+      const { data: reportSettingsData } = await supabase
+        .from('report_settings')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('setting_type', 'report_preferences')
+        .single()
+
+      if (reportSettingsData && reportSettingsData.setting_data) {
+        setSettings(prev => ({
+          ...prev,
+          ...reportSettingsData.setting_data
+        }))
+      } else {
+        // Set user email as default sender if no settings found
+        setSettings(prev => ({
+          ...prev,
+          email_settings: {
+            ...prev.email_settings,
+            sender_email: user.email || ''
+          },
+          automated_reports: {
+            ...prev.automated_reports,
+            recipients: [user.email || '']
+          }
+        }))
+      }
 
       // Load mock scheduled reports
       setScheduledReports([
@@ -285,10 +300,39 @@ export default function ReportingSettingsPage() {
     setMessage(null)
 
     try {
-      // In a real app, this would save to report_settings table
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
+
+      // Save to report_settings table
+      const reportSettingsData = {
+        user_id: user.id,
+        setting_type: 'report_preferences',
+        setting_data: {
+          automated_reports: settings.automated_reports,
+          export_formats: settings.export_formats,
+          email_settings: settings.email_settings,
+          dashboard_settings: settings.dashboard_settings,
+          data_retention: settings.data_retention
+        }
+      }
+
+      // Delete existing settings for this user
+      await supabase
+        .from('report_settings')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('setting_type', 'report_preferences')
+
+      // Insert new settings
+      const { error } = await supabase
+        .from('report_settings')
+        .insert(reportSettingsData)
+
+      if (error) throw error
+
       setMessage({ type: 'success', text: 'Rapportinnstillinger lagret' })
     } catch (error) {
+      console.error('Error saving report settings:', error)
       setMessage({ type: 'error', text: 'Feil ved lagring av innstillinger' })
     } finally {
       setIsSaving(false)

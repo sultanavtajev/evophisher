@@ -111,6 +111,30 @@ export default function SecuritySettingsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
+      // Load security settings from database
+      const { data: securitySettingsData } = await supabase
+        .from('system_preferences')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('category', 'security')
+
+      // Parse preferences data
+      const preferences: any = {}
+      if (securitySettingsData) {
+        securitySettingsData.forEach(pref => {
+          preferences[pref.setting_key] = pref.setting_value
+        })
+      }
+
+      // Set loaded settings or defaults
+      setSettings({
+        two_factor_enabled: preferences.two_factor_enabled !== undefined ? preferences.two_factor_enabled : false,
+        login_notifications: preferences.login_notifications !== undefined ? preferences.login_notifications : true,
+        suspicious_activity_alerts: preferences.suspicious_activity_alerts !== undefined ? preferences.suspicious_activity_alerts : true,
+        session_timeout_minutes: preferences.session_timeout_minutes || 480,
+        require_password_change_days: preferences.require_password_change_days || 90
+      })
+
       // Load mock data for demonstration
       setApiKeys([
         {
@@ -194,10 +218,65 @@ export default function SecuritySettingsPage() {
     setMessage(null)
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
+
+      // Prepare security settings to save
+      const settingsToSave = [
+        {
+          user_id: user.id,
+          category: 'security',
+          setting_key: 'two_factor_enabled',
+          setting_value: settings.two_factor_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'security',
+          setting_key: 'login_notifications',
+          setting_value: settings.login_notifications,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'security',
+          setting_key: 'suspicious_activity_alerts',
+          setting_value: settings.suspicious_activity_alerts,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'security',
+          setting_key: 'session_timeout_minutes',
+          setting_value: settings.session_timeout_minutes,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'security',
+          setting_key: 'require_password_change_days',
+          setting_value: settings.require_password_change_days,
+          is_global: false
+        }
+      ]
+
+      // Delete existing security settings
+      await supabase
+        .from('system_preferences')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('category', 'security')
+
+      // Insert new settings
+      const { error } = await supabase
+        .from('system_preferences')
+        .insert(settingsToSave)
+
+      if (error) throw error
+
       setMessage({ type: 'success', text: 'Sikkerhetsinnstillinger lagret' })
     } catch (error) {
+      console.error('Error saving security settings:', error)
       setMessage({ type: 'error', text: 'Feil ved lagring av innstillinger' })
     } finally {
       setIsSaving(false)
@@ -207,7 +286,11 @@ export default function SecuritySettingsPage() {
   const handleEnable2FA = async () => {
     try {
       // In a real app, this would generate QR code and setup 2FA
-      setSettings({ ...settings, two_factor_enabled: true })
+      const newSettings = { ...settings, two_factor_enabled: true }
+      setSettings(newSettings)
+
+      // Save to database immediately
+      await handleSettingUpdate('two_factor_enabled', true)
       setMessage({ type: 'success', text: 'To-faktor autentisering aktivert' })
     } catch (error) {
       setMessage({ type: 'error', text: 'Feil ved aktivering av 2FA' })
@@ -216,10 +299,45 @@ export default function SecuritySettingsPage() {
 
   const handleDisable2FA = async () => {
     try {
-      setSettings({ ...settings, two_factor_enabled: false })
+      const newSettings = { ...settings, two_factor_enabled: false }
+      setSettings(newSettings)
+
+      // Save to database immediately
+      await handleSettingUpdate('two_factor_enabled', false)
       setMessage({ type: 'success', text: 'To-faktor autentisering deaktivert' })
     } catch (error) {
       setMessage({ type: 'error', text: 'Feil ved deaktivering av 2FA' })
+    }
+  }
+
+  const handleSettingUpdate = async (key: string, value: any) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
+
+      // Delete existing setting
+      await supabase
+        .from('system_preferences')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('category', 'security')
+        .eq('setting_key', key)
+
+      // Insert new setting
+      const { error } = await supabase
+        .from('system_preferences')
+        .insert({
+          user_id: user.id,
+          category: 'security',
+          setting_key: key,
+          setting_value: value,
+          is_global: false
+        })
+
+      if (error) throw error
+    } catch (error) {
+      console.error('Error updating security setting:', error)
+      throw error
     }
   }
 
@@ -432,7 +550,16 @@ export default function SecuritySettingsPage() {
                 </div>
                 <Switch
                   checked={settings.login_notifications}
-                  onCheckedChange={(checked) => setSettings({ ...settings, login_notifications: checked })}
+                  onCheckedChange={async (checked) => {
+                    setSettings({ ...settings, login_notifications: checked })
+                    try {
+                      await handleSettingUpdate('login_notifications', checked)
+                      setMessage({ type: 'success', text: 'Innloggingsvarsling oppdatert' })
+                      setTimeout(() => setMessage(null), 2000)
+                    } catch (error) {
+                      setMessage({ type: 'error', text: 'Feil ved lagring av innstilling' })
+                    }
+                  }}
                 />
               </div>
 
@@ -447,7 +574,16 @@ export default function SecuritySettingsPage() {
                 </div>
                 <Switch
                   checked={settings.suspicious_activity_alerts}
-                  onCheckedChange={(checked) => setSettings({ ...settings, suspicious_activity_alerts: checked })}
+                  onCheckedChange={async (checked) => {
+                    setSettings({ ...settings, suspicious_activity_alerts: checked })
+                    try {
+                      await handleSettingUpdate('suspicious_activity_alerts', checked)
+                      setMessage({ type: 'success', text: 'Mistenkelig aktivitetsvarsel oppdatert' })
+                      setTimeout(() => setMessage(null), 2000)
+                    } catch (error) {
+                      setMessage({ type: 'error', text: 'Feil ved lagring av innstilling' })
+                    }
+                  }}
                 />
               </div>
 

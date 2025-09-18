@@ -92,17 +92,32 @@ export default function ProfileSettingsPage() {
         return
       }
 
+      // Load user preferences from system_preferences table
+      const { data: preferencesData } = await supabase
+        .from('system_preferences')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('category', 'profile')
+
+      // Parse preferences data
+      const preferences: any = {}
+      if (preferencesData) {
+        preferencesData.forEach(pref => {
+          preferences[pref.setting_key] = pref.setting_value
+        })
+      }
+
       setProfile({
         id: user.id,
         first_name: profileData?.first_name || '',
         last_name: profileData?.last_name || '',
         phone: profileData?.phone || '',
         email: user.email || '',
-        timezone: 'Europe/Oslo', // Default for Norway
-        language: 'no',
-        email_notifications: true,
-        push_notifications: false,
-        marketing_emails: false
+        timezone: preferences.timezone || 'Europe/Oslo',
+        language: preferences.language || 'no',
+        email_notifications: preferences.email_notifications !== undefined ? preferences.email_notifications : true,
+        push_notifications: preferences.push_notifications !== undefined ? preferences.push_notifications : false,
+        marketing_emails: preferences.marketing_emails !== undefined ? preferences.marketing_emails : false
       })
 
     } catch (error) {
@@ -119,7 +134,8 @@ export default function ProfileSettingsPage() {
     setMessage(null)
 
     try {
-      const { error } = await supabase
+      // Update profile table
+      const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
           id: profile.id,
@@ -129,8 +145,63 @@ export default function ProfileSettingsPage() {
           updated_at: new Date().toISOString()
         })
 
-      if (error) {
-        throw error
+      if (profileError) {
+        throw profileError
+      }
+
+      // Update preferences in system_preferences table
+      const preferencesToSave = [
+        {
+          user_id: profile.id,
+          category: 'profile',
+          setting_key: 'timezone',
+          setting_value: profile.timezone,
+          is_global: false
+        },
+        {
+          user_id: profile.id,
+          category: 'profile',
+          setting_key: 'language',
+          setting_value: profile.language,
+          is_global: false
+        },
+        {
+          user_id: profile.id,
+          category: 'profile',
+          setting_key: 'email_notifications',
+          setting_value: profile.email_notifications,
+          is_global: false
+        },
+        {
+          user_id: profile.id,
+          category: 'profile',
+          setting_key: 'push_notifications',
+          setting_value: profile.push_notifications,
+          is_global: false
+        },
+        {
+          user_id: profile.id,
+          category: 'profile',
+          setting_key: 'marketing_emails',
+          setting_value: profile.marketing_emails,
+          is_global: false
+        }
+      ]
+
+      // Delete existing profile preferences
+      await supabase
+        .from('system_preferences')
+        .delete()
+        .eq('user_id', profile.id)
+        .eq('category', 'profile')
+
+      // Insert new preferences
+      const { error: preferencesError } = await supabase
+        .from('system_preferences')
+        .insert(preferencesToSave)
+
+      if (preferencesError) {
+        throw preferencesError
       }
 
       setMessage({ type: 'success', text: 'Profil oppdatert' })
@@ -139,6 +210,40 @@ export default function ProfileSettingsPage() {
       setMessage({ type: 'error', text: 'Feil ved oppdatering av profil' })
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handlePreferenceUpdate = async (key: string, value: any) => {
+    try {
+      // Delete existing preference
+      await supabase
+        .from('system_preferences')
+        .delete()
+        .eq('user_id', profile.id)
+        .eq('category', 'profile')
+        .eq('setting_key', key)
+
+      // Insert new preference
+      const { error } = await supabase
+        .from('system_preferences')
+        .insert({
+          user_id: profile.id,
+          category: 'profile',
+          setting_key: key,
+          setting_value: value,
+          is_global: false
+        })
+
+      if (error) {
+        throw error
+      }
+
+      // Show brief success message
+      setMessage({ type: 'success', text: 'Innstilling lagret' })
+      setTimeout(() => setMessage(null), 2000) // Clear message after 2 seconds
+    } catch (error) {
+      console.error('Error updating preference:', error)
+      setMessage({ type: 'error', text: 'Feil ved lagring av innstilling' })
     }
   }
 
@@ -309,7 +414,10 @@ export default function ProfileSettingsPage() {
             <CardContent className="space-y-4">
               <div>
                 <Label htmlFor="language">Språk</Label>
-                <Select value={profile.language} onValueChange={(value) => setProfile({ ...profile, language: value })}>
+                <Select value={profile.language} onValueChange={(value) => {
+                  setProfile({ ...profile, language: value })
+                  handlePreferenceUpdate('language', value)
+                }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Velg språk" />
                   </SelectTrigger>
@@ -324,7 +432,10 @@ export default function ProfileSettingsPage() {
 
               <div>
                 <Label htmlFor="timezone">Tidszone</Label>
-                <Select value={profile.timezone} onValueChange={(value) => setProfile({ ...profile, timezone: value })}>
+                <Select value={profile.timezone} onValueChange={(value) => {
+                  setProfile({ ...profile, timezone: value })
+                  handlePreferenceUpdate('timezone', value)
+                }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Velg tidszone" />
                   </SelectTrigger>
@@ -361,7 +472,10 @@ export default function ProfileSettingsPage() {
                 <Switch
                   id="email-notifications"
                   checked={profile.email_notifications}
-                  onCheckedChange={(checked) => setProfile({ ...profile, email_notifications: checked })}
+                  onCheckedChange={(checked) => {
+                    setProfile({ ...profile, email_notifications: checked })
+                    handlePreferenceUpdate('email_notifications', checked)
+                  }}
                 />
               </div>
 
@@ -377,7 +491,10 @@ export default function ProfileSettingsPage() {
                 <Switch
                   id="push-notifications"
                   checked={profile.push_notifications}
-                  onCheckedChange={(checked) => setProfile({ ...profile, push_notifications: checked })}
+                  onCheckedChange={(checked) => {
+                    setProfile({ ...profile, push_notifications: checked })
+                    handlePreferenceUpdate('push_notifications', checked)
+                  }}
                 />
               </div>
 
@@ -393,7 +510,10 @@ export default function ProfileSettingsPage() {
                 <Switch
                   id="marketing-emails"
                   checked={profile.marketing_emails}
-                  onCheckedChange={(checked) => setProfile({ ...profile, marketing_emails: checked })}
+                  onCheckedChange={(checked) => {
+                    setProfile({ ...profile, marketing_emails: checked })
+                    handlePreferenceUpdate('marketing_emails', checked)
+                  }}
                 />
               </div>
             </CardContent>

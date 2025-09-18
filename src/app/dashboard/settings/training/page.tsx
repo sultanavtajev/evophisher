@@ -243,70 +243,63 @@ export default function TrainingSettingsPage() {
         }
       ])
 
-      // Load mock learning paths
-      setLearningPaths([
-        {
-          id: '1',
-          name: 'Ny ansatt sikkerhetstrening',
-          description: 'Komplett onboarding-program for nye ansatte',
-          modules: ['1', '3', '4'],
-          target_audience: 'Alle nye ansatte',
-          estimated_total_duration: 65,
-          completion_rate: 78,
-          is_active: true
-        },
-        {
-          id: '2',
-          name: 'IT-spesialist sertifisering',
-          description: 'Avansert treningsløp for IT-personell',
-          modules: ['2', '4'],
-          target_audience: 'IT-avdeling',
-          estimated_total_duration: 65,
-          completion_rate: 45,
-          is_active: true
-        },
-        {
-          id: '3',
-          name: 'Ledelsestrening',
-          description: 'Sikkerhetsledelse og risikohåndtering',
-          modules: ['3'],
-          target_audience: 'Ledere og mellomledere',
-          estimated_total_duration: 30,
-          completion_rate: 67,
-          is_active: false
-        }
-      ])
+      // Load learning paths from database
+      const { data: pathsData } = await supabase
+        .from('training_paths')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
 
-      // Load mock assignment rules
-      setAssignmentRules([
-        {
-          id: '1',
-          name: 'Ny ansatt onboarding',
-          trigger: 'new_employee',
-          target_modules: ['1', '3'],
-          target_groups: ['Alle ansatte'],
-          is_active: true,
-          created_date: '2024-01-15'
-        },
-        {
-          id: '2',
-          name: 'Høy risiko oppfølging',
-          trigger: 'failed_phishing',
-          target_modules: ['1', '2'],
-          target_groups: ['Ansatte med >30% klikkrate'],
-          is_active: true,
-          created_date: '2024-01-10'
-        },
-        {
-          id: '3',
-          name: 'Kvartalsvis oppfriskning',
-          trigger: 'periodic',
-          target_modules: ['4'],
-          target_groups: ['Alle ansatte'],
-          is_active: false,
-          created_date: '2024-01-05'
-        }
-      ])
+      if (pathsData) {
+        const paths = pathsData.map(path => ({
+          id: path.id,
+          name: path.name,
+          description: path.description || '',
+          modules: path.modules || [],
+          target_audience: path.target_audience || '',
+          estimated_total_duration: path.estimated_total_duration || 0,
+          completion_rate: 0, // TODO: Calculate from employee_training data
+          is_active: path.is_active
+        }))
+        setLearningPaths(paths)
+      }
+
+      // Load assignment rules from database
+      const { data: rulesData } = await supabase
+        .from('auto_assignment_rules')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+
+      if (rulesData) {
+        const rules = rulesData.map(rule => ({
+          id: rule.id,
+          name: rule.name,
+          trigger: rule.trigger_type,
+          target_modules: rule.target_modules || [],
+          target_groups: rule.target_groups || [],
+          is_active: rule.is_active,
+          created_date: rule.created_at
+        }))
+        setAssignmentRules(rules)
+      }
+
+      // Load training settings from database
+      const { data: trainingSettingsData } = await supabase
+        .from('training_settings')
+        .select('*')
+        .eq('user_id', user.id)
+        .single()
+
+      if (trainingSettingsData) {
+        setSettings({
+          auto_assignment: trainingSettingsData.auto_assignment_rules || settings.auto_assignment,
+          certification: settings.certification, // Not stored in DB yet
+          notifications: trainingSettingsData.notification_settings || settings.notifications,
+          content_settings: trainingSettingsData.branding_settings || settings.content_settings,
+          scoring: trainingSettingsData.scoring_settings || settings.scoring
+        })
+      }
 
     } catch (error) {
       console.error('Error loading training data:', error)
@@ -315,15 +308,42 @@ export default function TrainingSettingsPage() {
     }
   }
 
+  const handleSettingUpdate = async (settingPath: string, value: any) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
+
+      // Save to training_settings table with upsert
+      const trainingSettingsData = {
+        user_id: user.id,
+        auto_assignment_rules: settings.auto_assignment,
+        scoring_settings: settings.scoring,
+        notification_settings: settings.notifications,
+        branding_settings: settings.content_settings,
+        certification_settings: settings.certification
+      }
+
+      const { error } = await supabase
+        .from('training_settings')
+        .upsert(trainingSettingsData, {
+          onConflict: 'user_id'
+        })
+
+      if (error) throw error
+    } catch (error) {
+      console.error('Error auto-saving training settings:', error)
+    }
+  }
+
   const handleSaveSettings = async () => {
     setIsSaving(true)
     setMessage(null)
 
     try {
-      // In a real app, this would save to training_settings table
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await handleSettingUpdate('manual_save', true)
       setMessage({ type: 'success', text: 'Treningsinnstillinger lagret' })
     } catch (error) {
+      console.error('Error saving training settings:', error)
       setMessage({ type: 'error', text: 'Feil ved lagring av innstillinger' })
     } finally {
       setIsSaving(false)
@@ -338,56 +358,137 @@ export default function TrainingSettingsPage() {
   }
 
   const handleToggleLearningPath = async (pathId: string) => {
-    setLearningPaths(learningPaths.map(path =>
-      path.id === pathId ? { ...path, is_active: !path.is_active } : path
-    ))
-    setMessage({ type: 'success', text: 'Læringsstier-status oppdatert' })
+    try {
+      const updatedPaths = learningPaths.map(path =>
+        path.id === pathId ? { ...path, is_active: !path.is_active } : path
+      )
+      setLearningPaths(updatedPaths)
+
+      const pathToUpdate = updatedPaths.find(p => p.id === pathId)
+      if (pathToUpdate) {
+        const { error } = await supabase
+          .from('training_paths')
+          .update({ is_active: pathToUpdate.is_active })
+          .eq('id', pathId)
+
+        if (error) throw error
+      }
+
+      setMessage({ type: 'success', text: 'Læringsstier-status oppdatert' })
+    } catch (error) {
+      console.error('Error updating learning path:', error)
+      setMessage({ type: 'error', text: 'Feil ved oppdatering av læringsstier' })
+    }
   }
 
   const handleToggleRule = async (ruleId: string) => {
-    setAssignmentRules(assignmentRules.map(rule =>
-      rule.id === ruleId ? { ...rule, is_active: !rule.is_active } : rule
-    ))
-    setMessage({ type: 'success', text: 'Regel-status oppdatert' })
+    try {
+      const updatedRules = assignmentRules.map(rule =>
+        rule.id === ruleId ? { ...rule, is_active: !rule.is_active } : rule
+      )
+      setAssignmentRules(updatedRules)
+
+      const ruleToUpdate = updatedRules.find(r => r.id === ruleId)
+      if (ruleToUpdate) {
+        const { error } = await supabase
+          .from('auto_assignment_rules')
+          .update({ is_active: ruleToUpdate.is_active })
+          .eq('id', ruleId)
+
+        if (error) throw error
+      }
+
+      setMessage({ type: 'success', text: 'Regel-status oppdatert' })
+    } catch (error) {
+      console.error('Error updating assignment rule:', error)
+      setMessage({ type: 'error', text: 'Feil ved oppdatering av regel' })
+    }
   }
 
   const handleAddLearningPath = async () => {
     if (!newPath.name.trim()) return
 
-    const path: LearningPath = {
-      id: Date.now().toString(),
-      name: newPath.name,
-      description: newPath.description,
-      modules: [],
-      target_audience: newPath.target_audience,
-      estimated_total_duration: 0,
-      completion_rate: 0,
-      is_active: true
-    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
 
-    setLearningPaths([...learningPaths, path])
-    setNewPath({ name: '', description: '', target_audience: '' })
-    setShowNewPath(false)
-    setMessage({ type: 'success', text: 'Læringsstier lagt til' })
+      const { data, error } = await supabase
+        .from('training_paths')
+        .insert({
+          user_id: user.id,
+          name: newPath.name,
+          description: newPath.description,
+          modules: [],
+          target_audience: newPath.target_audience,
+          estimated_total_duration: 0,
+          is_active: true
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      const path: LearningPath = {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        modules: data.modules || [],
+        target_audience: data.target_audience,
+        estimated_total_duration: data.estimated_total_duration,
+        completion_rate: 0,
+        is_active: data.is_active
+      }
+
+      setLearningPaths([...learningPaths, path])
+      setNewPath({ name: '', description: '', target_audience: '' })
+      setShowNewPath(false)
+      setMessage({ type: 'success', text: 'Læringsstier lagt til' })
+    } catch (error) {
+      console.error('Error adding learning path:', error)
+      setMessage({ type: 'error', text: 'Feil ved lagring av læringsstier' })
+    }
   }
 
   const handleAddRule = async () => {
     if (!newRule.name.trim()) return
 
-    const rule: AutoAssignmentRule = {
-      id: Date.now().toString(),
-      name: newRule.name,
-      trigger: newRule.trigger,
-      target_modules: [],
-      target_groups: [newRule.target_groups],
-      is_active: true,
-      created_date: new Date().toISOString().split('T')[0]
-    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
 
-    setAssignmentRules([...assignmentRules, rule])
-    setNewRule({ name: '', trigger: '', target_groups: '' })
-    setShowNewRule(false)
-    setMessage({ type: 'success', text: 'Regel lagt til' })
+      const { data, error } = await supabase
+        .from('auto_assignment_rules')
+        .insert({
+          user_id: user.id,
+          name: newRule.name,
+          trigger_type: newRule.trigger,
+          target_modules: [],
+          target_groups: [newRule.target_groups],
+          is_active: true
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      const rule: AutoAssignmentRule = {
+        id: data.id,
+        name: data.name,
+        trigger: data.trigger_type,
+        target_modules: data.target_modules || [],
+        target_groups: data.target_groups || [],
+        is_active: data.is_active,
+        created_date: data.created_at
+      }
+
+      setAssignmentRules([...assignmentRules, rule])
+      setNewRule({ name: '', trigger: '', target_groups: '' })
+      setShowNewRule(false)
+      setMessage({ type: 'success', text: 'Regel lagt til' })
+    } catch (error) {
+      console.error('Error adding assignment rule:', error)
+      setMessage({ type: 'error', text: 'Feil ved lagring av regel' })
+    }
   }
 
   const getModuleTypeBadge = (type: string) => {
@@ -480,10 +581,13 @@ export default function TrainingSettingsPage() {
                 </div>
                 <Switch
                   checked={settings.auto_assignment.enabled}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    auto_assignment: { ...settings.auto_assignment, enabled: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      auto_assignment: { ...settings.auto_assignment, enabled: checked }
+                    })
+                    handleSettingUpdate('auto_assignment.enabled', checked)
+                  }}
                 />
               </div>
 
@@ -495,10 +599,13 @@ export default function TrainingSettingsPage() {
                     <Label className="text-sm">Nye ansatte</Label>
                     <Switch
                       checked={settings.auto_assignment.new_employee_training}
-                      onCheckedChange={(checked) => setSettings({
-                        ...settings,
-                        auto_assignment: { ...settings.auto_assignment, new_employee_training: checked }
-                      })}
+                      onCheckedChange={(checked) => {
+                        setSettings({
+                          ...settings,
+                          auto_assignment: { ...settings.auto_assignment, new_employee_training: checked }
+                        })
+                        handleSettingUpdate('auto_assignment.new_employee_training', checked)
+                      }}
                     />
                   </div>
 
@@ -506,10 +613,13 @@ export default function TrainingSettingsPage() {
                     <Label className="text-sm">Etter feilede phishing-tester</Label>
                     <Switch
                       checked={settings.auto_assignment.failed_phishing_training}
-                      onCheckedChange={(checked) => setSettings({
-                        ...settings,
-                        auto_assignment: { ...settings.auto_assignment, failed_phishing_training: checked }
-                      })}
+                      onCheckedChange={(checked) => {
+                        setSettings({
+                          ...settings,
+                          auto_assignment: { ...settings.auto_assignment, failed_phishing_training: checked }
+                        })
+                        handleSettingUpdate('auto_assignment.failed_phishing_training', checked)
+                      }}
                     />
                   </div>
 
@@ -517,10 +627,13 @@ export default function TrainingSettingsPage() {
                     <Label className="text-sm">Periodisk oppfriskning</Label>
                     <Switch
                       checked={settings.auto_assignment.periodic_refresher}
-                      onCheckedChange={(checked) => setSettings({
-                        ...settings,
-                        auto_assignment: { ...settings.auto_assignment, periodic_refresher: checked }
-                      })}
+                      onCheckedChange={(checked) => {
+                        setSettings({
+                          ...settings,
+                          auto_assignment: { ...settings.auto_assignment, periodic_refresher: checked }
+                        })
+                        handleSettingUpdate('auto_assignment.periodic_refresher', checked)
+                      }}
                     />
                   </div>
 
@@ -584,10 +697,13 @@ export default function TrainingSettingsPage() {
                 </div>
                 <Switch
                   checked={settings.certification.enabled}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    certification: { ...settings.certification, enabled: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      certification: { ...settings.certification, enabled: checked }
+                    })
+                    handleSettingUpdate('certification.enabled', checked)
+                  }}
                 />
               </div>
 
@@ -614,10 +730,13 @@ export default function TrainingSettingsPage() {
                     <Label className="text-sm">Tillat nye forsøk</Label>
                     <Switch
                       checked={settings.certification.allow_retakes}
-                      onCheckedChange={(checked) => setSettings({
-                        ...settings,
-                        certification: { ...settings.certification, allow_retakes: checked }
-                      })}
+                      onCheckedChange={(checked) => {
+                        setSettings({
+                          ...settings,
+                          certification: { ...settings.certification, allow_retakes: checked }
+                        })
+                        handleSettingUpdate('certification.allow_retakes', checked)
+                      }}
                     />
                   </div>
 
@@ -770,8 +889,10 @@ export default function TrainingSettingsPage() {
             <CardContent className="space-y-6">
               <div>
                 <Label className="text-sm">Standard språk</Label>
-                <Select value={settings.content_settings.default_language} onValueChange={(value) =>
-                  setSettings({...settings, content_settings: {...settings.content_settings, default_language: value}})}>
+                <Select value={settings.content_settings.default_language} onValueChange={(value) => {
+                  setSettings({...settings, content_settings: {...settings.content_settings, default_language: value}})
+                  handleSettingUpdate('content_settings.default_language', value)
+                }}>
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
@@ -788,10 +909,13 @@ export default function TrainingSettingsPage() {
                 <Label className="text-sm">Inkluder bedrifts-branding</Label>
                 <Switch
                   checked={settings.content_settings.include_company_branding}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    content_settings: { ...settings.content_settings, include_company_branding: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      content_settings: { ...settings.content_settings, include_company_branding: checked }
+                    })
+                    handleSettingUpdate('content_settings.include_company_branding', checked)
+                  }}
                 />
               </div>
 

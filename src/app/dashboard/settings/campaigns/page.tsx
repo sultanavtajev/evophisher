@@ -81,12 +81,39 @@ export default function CampaignSettingsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // Load user's email for default sender
-      setSettings(prev => ({
-        ...prev,
-        default_sender_email: user.email || '',
-        report_recipients: user.email || ''
-      }))
+      // Load campaign settings from database
+      const { data: campaignSettingsData } = await supabase
+        .from('system_preferences')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('category', 'campaign')
+
+      // Parse preferences data
+      const preferences: any = {}
+      if (campaignSettingsData) {
+        campaignSettingsData.forEach(pref => {
+          preferences[pref.setting_key] = pref.setting_value
+        })
+      }
+
+      // Set loaded settings or defaults
+      setSettings({
+        default_sender_name: preferences.default_sender_name || '',
+        default_sender_email: preferences.default_sender_email || user.email || '',
+        default_landing_page_url: preferences.default_landing_page_url || '',
+        smtp_host: preferences.smtp_host || '',
+        smtp_port: preferences.smtp_port || 587,
+        smtp_username: preferences.smtp_username || '',
+        smtp_password: preferences.smtp_password || '',
+        smtp_encryption: preferences.smtp_encryption || 'tls',
+        auto_send_enabled: preferences.auto_send_enabled !== undefined ? preferences.auto_send_enabled : false,
+        auto_send_delay_hours: preferences.auto_send_delay_hours || 24,
+        email_tracking_enabled: preferences.email_tracking_enabled !== undefined ? preferences.email_tracking_enabled : true,
+        link_tracking_enabled: preferences.link_tracking_enabled !== undefined ? preferences.link_tracking_enabled : true,
+        auto_reports_enabled: preferences.auto_reports_enabled !== undefined ? preferences.auto_reports_enabled : false,
+        report_frequency: preferences.report_frequency || 'weekly',
+        report_recipients: preferences.report_recipients || user.email || ''
+      })
 
     } catch (error) {
       console.error('Error loading campaign settings:', error)
@@ -101,11 +128,131 @@ export default function CampaignSettingsPage() {
     setMessage(null)
 
     try {
-      // In a real app, this would save to a user_preferences table
-      // For now, we'll just show success
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
 
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Prepare settings to save
+      const settingsToSave = [
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'default_sender_name',
+          setting_value: settings.default_sender_name,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'default_sender_email',
+          setting_value: settings.default_sender_email,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'default_landing_page_url',
+          setting_value: settings.default_landing_page_url,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'smtp_host',
+          setting_value: settings.smtp_host,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'smtp_port',
+          setting_value: settings.smtp_port,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'smtp_username',
+          setting_value: settings.smtp_username,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'smtp_password',
+          setting_value: settings.smtp_password,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'smtp_encryption',
+          setting_value: settings.smtp_encryption,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'auto_send_enabled',
+          setting_value: settings.auto_send_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'auto_send_delay_hours',
+          setting_value: settings.auto_send_delay_hours,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'email_tracking_enabled',
+          setting_value: settings.email_tracking_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'link_tracking_enabled',
+          setting_value: settings.link_tracking_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'auto_reports_enabled',
+          setting_value: settings.auto_reports_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'report_frequency',
+          setting_value: settings.report_frequency,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'campaign',
+          setting_key: 'report_recipients',
+          setting_value: settings.report_recipients,
+          is_global: false
+        }
+      ]
+
+      // Delete existing campaign settings
+      await supabase
+        .from('system_preferences')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('category', 'campaign')
+
+      // Insert new settings
+      const { error } = await supabase
+        .from('system_preferences')
+        .insert(settingsToSave)
+
+      if (error) throw error
 
       setMessage({ type: 'success', text: 'Kampanje-innstillinger lagret' })
     } catch (error) {
@@ -121,11 +268,18 @@ export default function CampaignSettingsPage() {
     setMessage(null)
 
     try {
-      // Simulate email test
+      // Basic validation
+      if (!settings.smtp_host || !settings.smtp_username) {
+        throw new Error('SMTP-konfigurasjon er ikke komplett')
+      }
+
+      // In a real app, this would actually send a test email
+      // For now, simulate the test with validation
       await new Promise(resolve => setTimeout(resolve, 2000))
-      setMessage({ type: 'success', text: 'Test-e-post sendt til ' + settings.default_sender_email })
+
+      setMessage({ type: 'success', text: 'Test-e-post konfigurasjon validert for ' + settings.smtp_host })
     } catch (error) {
-      setMessage({ type: 'error', text: 'Feil ved sending av test-e-post' })
+      setMessage({ type: 'error', text: 'Feil ved testing av e-post konfigurasjon: ' + (error as Error).message })
     } finally {
       setIsTestingEmail(false)
     }

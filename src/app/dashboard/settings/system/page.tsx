@@ -232,27 +232,24 @@ export default function SystemPreferencesPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // Load mock webhooks
-      setWebhooks([
-        {
-          id: '1',
-          name: 'Security Alerts',
-          url: 'https://hooks.slack.com/services/xxx/yyy/zzz',
-          events: ['security_incident', 'failed_login'],
-          is_active: true,
-          last_success: '2024-01-20T15:30:00Z',
-          created_date: '2024-01-15'
-        },
-        {
-          id: '2',
-          name: 'Campaign Reports',
-          url: 'https://api.company.com/webhooks/campaigns',
-          events: ['campaign_completed', 'high_risk_detection'],
-          is_active: false,
-          last_success: null,
-          created_date: '2024-01-10'
-        }
-      ])
+      // Load webhooks from database
+      const { data: webhookData } = await supabase
+        .from('webhook_configurations')
+        .select('*')
+        .eq('user_id', user.id)
+
+      if (webhookData) {
+        const webhookConfigs = webhookData.map(webhook => ({
+          id: webhook.id,
+          name: webhook.name,
+          url: webhook.url,
+          events: webhook.events || [],
+          is_active: webhook.is_active,
+          last_success: null, // TODO: Add last_success tracking
+          created_date: webhook.created_at
+        }))
+        setWebhooks(webhookConfigs)
+      }
 
       // Load mock integrations
       setIntegrations([
@@ -286,33 +283,48 @@ export default function SystemPreferencesPage() {
         }
       ])
 
-      // Load mock compliance records
-      setComplianceRecords([
-        {
-          id: '1',
-          type: 'GDPR Request',
-          subject: 'Data Subject Access Request',
-          status: 'completed',
-          created_date: '2024-01-18',
-          due_date: '2024-02-17'
-        },
-        {
-          id: '2',
-          type: 'DPIA',
-          subject: 'New Campaign Feature Privacy Assessment',
-          status: 'in_progress',
-          created_date: '2024-01-15',
-          due_date: '2024-02-15'
-        },
-        {
-          id: '3',
-          type: 'Breach Notification',
-          subject: 'Data Processing Error - Incident #2024-001',
-          status: 'pending',
-          created_date: '2024-01-20',
-          due_date: '2024-01-23'
-        }
-      ])
+      // Load compliance records from database
+      const { data: complianceData } = await supabase
+        .from('compliance_records')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+
+      if (complianceData) {
+        const records = complianceData.map(record => ({
+          id: record.id,
+          type: record.record_type,
+          subject: record.subject_data?.subject || 'N/A',
+          status: record.status,
+          created_date: record.created_at,
+          due_date: record.subject_data?.due_date || null
+        }))
+        setComplianceRecords(records)
+      }
+
+      // Load system preferences from database
+      const { data: preferencesData } = await supabase
+        .from('system_preferences')
+        .select('*')
+        .eq('user_id', user.id)
+
+      if (preferencesData && preferencesData.length > 0) {
+        const loadedSettings = { ...settings }
+
+        preferencesData.forEach(pref => {
+          if (pref.category === 'notifications') {
+            (loadedSettings.notifications as any)[pref.setting_key] = pref.setting_value
+          } else if (pref.category === 'compliance') {
+            (loadedSettings.compliance as any)[pref.setting_key] = pref.setting_value
+          } else if (pref.category === 'performance') {
+            (loadedSettings.performance as any)[pref.setting_key] = pref.setting_value
+          } else if (pref.category === 'localization') {
+            (loadedSettings.localization as any)[pref.setting_key] = pref.setting_value
+          }
+        })
+
+        setSettings(loadedSettings)
+      }
 
     } catch (error) {
       console.error('Error loading system data:', error)
@@ -321,15 +333,281 @@ export default function SystemPreferencesPage() {
     }
   }
 
+  const handleSettingUpdate = async (category: string, settingKey: string, value: any) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
+
+      // Delete existing setting for this user and key
+      await supabase
+        .from('system_preferences')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('category', category)
+        .eq('setting_key', settingKey)
+
+      // Insert new setting
+      const { error } = await supabase
+        .from('system_preferences')
+        .insert({
+          user_id: user.id,
+          category: category,
+          setting_key: settingKey,
+          setting_value: value,
+          is_global: false
+        })
+
+      if (error) throw error
+    } catch (error) {
+      console.error('Error auto-saving setting:', error)
+    }
+  }
+
   const handleSaveSettings = async () => {
     setIsSaving(true)
     setMessage(null)
 
     try {
-      // In a real app, this would save to system_preferences table
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
+
+      // Save all settings to system_preferences table
+      const settingsToSave = [
+        {
+          user_id: user.id,
+          category: 'notifications',
+          setting_key: 'browser_notifications',
+          setting_value: settings.notifications.browser_notifications,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'notifications',
+          setting_key: 'email_notifications',
+          setting_value: settings.notifications.email_notifications,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'notifications',
+          setting_key: 'critical_alerts',
+          setting_value: settings.notifications.critical_alerts,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'notifications',
+          setting_key: 'maintenance_notifications',
+          setting_value: settings.notifications.maintenance_notifications,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'notifications',
+          setting_key: 'quiet_hours_enabled',
+          setting_value: settings.notifications.quiet_hours_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'notifications',
+          setting_key: 'quiet_start_time',
+          setting_value: settings.notifications.quiet_start_time,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'notifications',
+          setting_key: 'quiet_end_time',
+          setting_value: settings.notifications.quiet_end_time,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'notifications',
+          setting_key: 'escalation_enabled',
+          setting_value: settings.notifications.escalation_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'notifications',
+          setting_key: 'escalation_threshold_minutes',
+          setting_value: settings.notifications.escalation_threshold_minutes,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'compliance',
+          setting_key: 'gdpr_enabled',
+          setting_value: settings.compliance.gdpr_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'compliance',
+          setting_key: 'audit_logging',
+          setting_value: settings.compliance.audit_logging,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'compliance',
+          setting_key: 'data_anonymization',
+          setting_value: settings.compliance.data_anonymization,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'compliance',
+          setting_key: 'breach_notification',
+          setting_value: settings.compliance.breach_notification,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'compliance',
+          setting_key: 'consent_tracking',
+          setting_value: settings.compliance.consent_tracking,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'compliance',
+          setting_key: 'privacy_impact_assessments',
+          setting_value: settings.compliance.privacy_impact_assessments,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'compliance',
+          setting_key: 'cross_border_controls',
+          setting_value: settings.compliance.cross_border_controls,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'performance',
+          setting_key: 'auto_cleanup',
+          setting_value: settings.performance.auto_cleanup,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'performance',
+          setting_key: 'cleanup_frequency_days',
+          setting_value: settings.performance.cleanup_frequency_days,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'performance',
+          setting_key: 'backup_enabled',
+          setting_value: settings.performance.backup_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'performance',
+          setting_key: 'backup_frequency',
+          setting_value: settings.performance.backup_frequency,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'performance',
+          setting_key: 'cache_enabled',
+          setting_value: settings.performance.cache_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'performance',
+          setting_key: 'cache_ttl_hours',
+          setting_value: settings.performance.cache_ttl_hours,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'performance',
+          setting_key: 'monitoring_enabled',
+          setting_value: settings.performance.monitoring_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'localization',
+          setting_key: 'default_timezone',
+          setting_value: settings.localization.default_timezone,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'localization',
+          setting_key: 'default_language',
+          setting_value: settings.localization.default_language,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'localization',
+          setting_key: 'date_format',
+          setting_value: settings.localization.date_format,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'localization',
+          setting_key: 'time_format',
+          setting_value: settings.localization.time_format,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'localization',
+          setting_key: 'currency',
+          setting_value: settings.localization.currency,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'localization',
+          setting_key: 'accessibility_enabled',
+          setting_value: settings.localization.accessibility_enabled,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'localization',
+          setting_key: 'high_contrast',
+          setting_value: settings.localization.high_contrast,
+          is_global: false
+        },
+        {
+          user_id: user.id,
+          category: 'localization',
+          setting_key: 'large_text',
+          setting_value: settings.localization.large_text,
+          is_global: false
+        }
+      ]
+
+      // Delete existing settings for this user
+      await supabase
+        .from('system_preferences')
+        .delete()
+        .eq('user_id', user.id)
+
+      // Insert new settings
+      const { error } = await supabase
+        .from('system_preferences')
+        .insert(settingsToSave)
+
+      if (error) throw error
+
       setMessage({ type: 'success', text: 'Systempreferanser lagret' })
     } catch (error) {
+      console.error('Error saving settings:', error)
       setMessage({ type: 'error', text: 'Feil ved lagring av innstillinger' })
     } finally {
       setIsSaving(false)
@@ -353,32 +631,83 @@ export default function SystemPreferencesPage() {
   const handleAddWebhook = async () => {
     if (!newWebhook.name.trim() || !newWebhook.url.trim()) return
 
-    const webhook: WebhookConfig = {
-      id: Date.now().toString(),
-      name: newWebhook.name,
-      url: newWebhook.url,
-      events: newWebhook.events.split(',').map(e => e.trim()),
-      is_active: true,
-      last_success: null,
-      created_date: new Date().toISOString().split('T')[0]
-    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
 
-    setWebhooks([...webhooks, webhook])
-    setNewWebhook({ name: '', url: '', events: '' })
-    setShowNewWebhook(false)
-    setMessage({ type: 'success', text: 'Webhook lagt til' })
+      const { data, error } = await supabase
+        .from('webhook_configurations')
+        .insert({
+          user_id: user.id,
+          name: newWebhook.name,
+          url: newWebhook.url,
+          events: newWebhook.events.split(',').map(e => e.trim()),
+          is_active: true
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      const webhook: WebhookConfig = {
+        id: data.id,
+        name: data.name,
+        url: data.url,
+        events: data.events,
+        is_active: data.is_active,
+        last_success: null,
+        created_date: data.created_at
+      }
+
+      setWebhooks([...webhooks, webhook])
+      setNewWebhook({ name: '', url: '', events: '' })
+      setShowNewWebhook(false)
+      setMessage({ type: 'success', text: 'Webhook lagt til' })
+    } catch (error) {
+      console.error('Error adding webhook:', error)
+      setMessage({ type: 'error', text: 'Feil ved lagring av webhook' })
+    }
   }
 
   const handleToggleWebhook = async (webhookId: string) => {
-    setWebhooks(webhooks.map(webhook =>
-      webhook.id === webhookId ? { ...webhook, is_active: !webhook.is_active } : webhook
-    ))
-    setMessage({ type: 'success', text: 'Webhook-status oppdatert' })
+    try {
+      const updatedWebhooks = webhooks.map(webhook =>
+        webhook.id === webhookId ? { ...webhook, is_active: !webhook.is_active } : webhook
+      )
+      setWebhooks(updatedWebhooks)
+
+      const webhookToUpdate = updatedWebhooks.find(w => w.id === webhookId)
+      if (webhookToUpdate) {
+        const { error } = await supabase
+          .from('webhook_configurations')
+          .update({ is_active: webhookToUpdate.is_active })
+          .eq('id', webhookId)
+
+        if (error) throw error
+      }
+
+      setMessage({ type: 'success', text: 'Webhook-status oppdatert' })
+    } catch (error) {
+      console.error('Error updating webhook:', error)
+      setMessage({ type: 'error', text: 'Feil ved oppdatering av webhook' })
+    }
   }
 
   const handleDeleteWebhook = async (webhookId: string) => {
-    setWebhooks(webhooks.filter(webhook => webhook.id !== webhookId))
-    setMessage({ type: 'success', text: 'Webhook slettet' })
+    try {
+      const { error } = await supabase
+        .from('webhook_configurations')
+        .delete()
+        .eq('id', webhookId)
+
+      if (error) throw error
+
+      setWebhooks(webhooks.filter(webhook => webhook.id !== webhookId))
+      setMessage({ type: 'success', text: 'Webhook slettet' })
+    } catch (error) {
+      console.error('Error deleting webhook:', error)
+      setMessage({ type: 'error', text: 'Feil ved sletting av webhook' })
+    }
   }
 
   const getStatusBadge = (status: string) => {
@@ -466,10 +795,13 @@ export default function SystemPreferencesPage() {
                 <Label className="text-sm">Browser-varsler</Label>
                 <Switch
                   checked={settings.notifications.browser_notifications}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    notifications: { ...settings.notifications, browser_notifications: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      notifications: { ...settings.notifications, browser_notifications: checked }
+                    })
+                    handleSettingUpdate('notifications', 'browser_notifications', checked)
+                  }}
                 />
               </div>
 
@@ -477,10 +809,13 @@ export default function SystemPreferencesPage() {
                 <Label className="text-sm">E-post notifikasjoner</Label>
                 <Switch
                   checked={settings.notifications.email_notifications}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    notifications: { ...settings.notifications, email_notifications: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      notifications: { ...settings.notifications, email_notifications: checked }
+                    })
+                    handleSettingUpdate('notifications', 'email_notifications', checked)
+                  }}
                 />
               </div>
 
@@ -488,10 +823,13 @@ export default function SystemPreferencesPage() {
                 <Label className="text-sm">Kritiske sikkerhetsvarslinger</Label>
                 <Switch
                   checked={settings.notifications.critical_alerts}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    notifications: { ...settings.notifications, critical_alerts: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      notifications: { ...settings.notifications, critical_alerts: checked }
+                    })
+                    handleSettingUpdate('notifications', 'critical_alerts', checked)
+                  }}
                 />
               </div>
 
@@ -506,10 +844,13 @@ export default function SystemPreferencesPage() {
                 </div>
                 <Switch
                   checked={settings.notifications.quiet_hours_enabled}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    notifications: { ...settings.notifications, quiet_hours_enabled: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      notifications: { ...settings.notifications, quiet_hours_enabled: checked }
+                    })
+                    handleSettingUpdate('notifications', 'quiet_hours_enabled', checked)
+                  }}
                 />
               </div>
 
@@ -596,10 +937,13 @@ export default function SystemPreferencesPage() {
                 <div className="flex items-center space-x-2">
                   <Switch
                     checked={settings.compliance.gdpr_enabled}
-                    onCheckedChange={(checked) => setSettings({
-                      ...settings,
-                      compliance: { ...settings.compliance, gdpr_enabled: checked }
-                    })}
+                    onCheckedChange={(checked) => {
+                      setSettings({
+                        ...settings,
+                        compliance: { ...settings.compliance, gdpr_enabled: checked }
+                      })
+                      handleSettingUpdate('compliance', 'gdpr_enabled', checked)
+                    }}
                   />
                   {settings.compliance.gdpr_enabled && (
                     <Badge variant="default" className="bg-green-500">
@@ -614,10 +958,13 @@ export default function SystemPreferencesPage() {
                 <Label className="text-sm">Revisjonsspor</Label>
                 <Switch
                   checked={settings.compliance.audit_logging}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    compliance: { ...settings.compliance, audit_logging: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      compliance: { ...settings.compliance, audit_logging: checked }
+                    })
+                    handleSettingUpdate('compliance', 'audit_logging', checked)
+                  }}
                 />
               </div>
 
@@ -699,10 +1046,13 @@ export default function SystemPreferencesPage() {
                 </div>
                 <Switch
                   checked={settings.performance.auto_cleanup}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    performance: { ...settings.performance, auto_cleanup: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      performance: { ...settings.performance, auto_cleanup: checked }
+                    })
+                    handleSettingUpdate('performance', 'auto_cleanup', checked)
+                  }}
                 />
               </div>
 
@@ -729,18 +1079,23 @@ export default function SystemPreferencesPage() {
                 <Label className="text-sm">Automatisk backup</Label>
                 <Switch
                   checked={settings.performance.backup_enabled}
-                  onCheckedChange={(checked) => setSettings({
-                    ...settings,
-                    performance: { ...settings.performance, backup_enabled: checked }
-                  })}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      performance: { ...settings.performance, backup_enabled: checked }
+                    })
+                    handleSettingUpdate('performance', 'backup_enabled', checked)
+                  }}
                 />
               </div>
 
               {settings.performance.backup_enabled && (
                 <div>
                   <Label className="text-sm">Backup-frekvens</Label>
-                  <Select value={settings.performance.backup_frequency} onValueChange={(value) =>
-                    setSettings({...settings, performance: {...settings.performance, backup_frequency: value}})}>
+                  <Select value={settings.performance.backup_frequency} onValueChange={(value) => {
+                    setSettings({...settings, performance: {...settings.performance, backup_frequency: value}})
+                    handleSettingUpdate('performance', 'backup_frequency', value)
+                  }}>
                     <SelectTrigger className="mt-1">
                       <SelectValue />
                     </SelectTrigger>
@@ -812,8 +1167,10 @@ export default function SystemPreferencesPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <Label className="text-sm">Standard tidszone</Label>
-                  <Select value={settings.localization.default_timezone} onValueChange={(value) =>
-                    setSettings({...settings, localization: {...settings.localization, default_timezone: value}})}>
+                  <Select value={settings.localization.default_timezone} onValueChange={(value) => {
+                    setSettings({...settings, localization: {...settings.localization, default_timezone: value}})
+                    handleSettingUpdate('localization', 'default_timezone', value)
+                  }}>
                     <SelectTrigger className="mt-1">
                       <SelectValue />
                     </SelectTrigger>
@@ -827,8 +1184,10 @@ export default function SystemPreferencesPage() {
                 </div>
                 <div>
                   <Label className="text-sm">Standard språk</Label>
-                  <Select value={settings.localization.default_language} onValueChange={(value) =>
-                    setSettings({...settings, localization: {...settings.localization, default_language: value}})}>
+                  <Select value={settings.localization.default_language} onValueChange={(value) => {
+                    setSettings({...settings, localization: {...settings.localization, default_language: value}})
+                    handleSettingUpdate('localization', 'default_language', value)
+                  }}>
                     <SelectTrigger className="mt-1">
                       <SelectValue />
                     </SelectTrigger>

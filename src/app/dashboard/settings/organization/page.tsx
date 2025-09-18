@@ -145,6 +145,52 @@ export default function OrganizationSettingsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
+      // Load organization settings from database
+      const { data: organizationSettingsData } = await supabase
+        .from('organization_settings')
+        .select('*')
+        .eq('user_id', user.id)
+
+      // Parse settings data by category
+      const settingsByCategory: any = {}
+      if (organizationSettingsData) {
+        organizationSettingsData.forEach(setting => {
+          if (!settingsByCategory[setting.category]) {
+            settingsByCategory[setting.category] = {}
+          }
+          settingsByCategory[setting.category][setting.setting_key] = setting.setting_value
+        })
+      }
+
+      // Update settings with loaded data or keep defaults
+      setSettings({
+        default_company_info: {
+          country: settingsByCategory.default_company_info?.country || 'NO',
+          timezone: settingsByCategory.default_company_info?.timezone || 'Europe/Oslo',
+          business_type: settingsByCategory.default_company_info?.business_type || 'private',
+          default_address: settingsByCategory.default_company_info?.default_address || '',
+          default_phone: settingsByCategory.default_company_info?.default_phone || ''
+        },
+        employee_settings: {
+          required_fields: settingsByCategory.employee_settings?.required_fields || ['first_name', 'last_name', 'email'],
+          allowed_email_domains: settingsByCategory.employee_settings?.allowed_email_domains || [],
+          auto_categorize: settingsByCategory.employee_settings?.auto_categorize !== undefined ? settingsByCategory.employee_settings.auto_categorize : true,
+          default_department: settingsByCategory.employee_settings?.default_department || 'none'
+        },
+        data_retention: {
+          campaign_data_months: settingsByCategory.data_retention?.campaign_data_months || 24,
+          employee_data_years: settingsByCategory.data_retention?.employee_data_years || 7,
+          auto_anonymize: settingsByCategory.data_retention?.auto_anonymize !== undefined ? settingsByCategory.data_retention.auto_anonymize : true,
+          gdpr_compliant: settingsByCategory.data_retention?.gdpr_compliant !== undefined ? settingsByCategory.data_retention.gdpr_compliant : true
+        },
+        import_export: {
+          csv_delimiter: settingsByCategory.import_export?.csv_delimiter || ',',
+          date_format: settingsByCategory.import_export?.date_format || 'DD.MM.YYYY',
+          encoding: settingsByCategory.import_export?.encoding || 'UTF-8',
+          validate_emails: settingsByCategory.import_export?.validate_emails !== undefined ? settingsByCategory.import_export.validate_emails : true
+        }
+      })
+
       // Load mock departments data
       setDepartments([
         { id: '1', name: 'IT-avdeling', description: 'Informasjonsteknologi', employee_count: 15 },
@@ -173,10 +219,135 @@ export default function OrganizationSettingsPage() {
     setMessage(null)
 
     try {
-      // In a real app, this would save to organization_settings table
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user found')
+
+      // Save organization settings to database
+      const organizationSettingsToSave = [
+        // Default company info
+        {
+          user_id: user.id,
+          setting_key: 'country',
+          setting_value: settings.default_company_info.country,
+          category: 'default_company_info'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'timezone',
+          setting_value: settings.default_company_info.timezone,
+          category: 'default_company_info'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'business_type',
+          setting_value: settings.default_company_info.business_type,
+          category: 'default_company_info'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'default_address',
+          setting_value: settings.default_company_info.default_address,
+          category: 'default_company_info'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'default_phone',
+          setting_value: settings.default_company_info.default_phone,
+          category: 'default_company_info'
+        },
+        // Employee settings
+        {
+          user_id: user.id,
+          setting_key: 'required_fields',
+          setting_value: settings.employee_settings.required_fields,
+          category: 'employee_settings'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'allowed_email_domains',
+          setting_value: settings.employee_settings.allowed_email_domains,
+          category: 'employee_settings'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'auto_categorize',
+          setting_value: settings.employee_settings.auto_categorize,
+          category: 'employee_settings'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'default_department',
+          setting_value: settings.employee_settings.default_department,
+          category: 'employee_settings'
+        },
+        // Data retention
+        {
+          user_id: user.id,
+          setting_key: 'campaign_data_months',
+          setting_value: settings.data_retention.campaign_data_months,
+          category: 'data_retention'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'employee_data_years',
+          setting_value: settings.data_retention.employee_data_years,
+          category: 'data_retention'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'auto_anonymize',
+          setting_value: settings.data_retention.auto_anonymize,
+          category: 'data_retention'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'gdpr_compliant',
+          setting_value: settings.data_retention.gdpr_compliant,
+          category: 'data_retention'
+        },
+        // Import/Export
+        {
+          user_id: user.id,
+          setting_key: 'csv_delimiter',
+          setting_value: settings.import_export.csv_delimiter,
+          category: 'import_export'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'date_format',
+          setting_value: settings.import_export.date_format,
+          category: 'import_export'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'encoding',
+          setting_value: settings.import_export.encoding,
+          category: 'import_export'
+        },
+        {
+          user_id: user.id,
+          setting_key: 'validate_emails',
+          setting_value: settings.import_export.validate_emails,
+          category: 'import_export'
+        }
+      ]
+
+      // Delete existing organization settings for this user
+      await supabase
+        .from('organization_settings')
+        .delete()
+        .eq('user_id', user.id)
+
+      // Insert new settings
+      const { error } = await supabase
+        .from('organization_settings')
+        .insert(organizationSettingsToSave)
+
+      if (error) throw error
+
       setMessage({ type: 'success', text: 'Organisasjonsinnstillinger lagret' })
     } catch (error) {
+      console.error('Error saving organization settings:', error)
       setMessage({ type: 'error', text: 'Feil ved lagring av innstillinger' })
     } finally {
       setIsSaving(false)
