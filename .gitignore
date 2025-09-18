@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Claude Code specific files
+.claude/
+.mcp.json
+
+# Development SQL files (handled via Supabase migrations)
+*.sql
